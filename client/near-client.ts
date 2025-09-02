@@ -269,7 +269,7 @@ export class NEP141TokenClient {
   }
 }
 
-// Oracle Router Client
+// Oracle Router Client (Updated for Rhea Finance)
 export class OracleRouterClient {
   private connection: any;
   private wallet: WalletConnection;
@@ -295,6 +295,7 @@ export class OracleRouterClient {
         changeMethods: [
           'configure_oracle',
           'fetch_price',
+          'fetch_and_cache_price',
           'set_paused',
         ],
       }
@@ -309,6 +310,36 @@ export class OracleRouterClient {
     await this.contract.fetch_price({
       args: { underlying, quote },
       gas: new BN('50000000000000'),
+    });
+  }
+
+  async fetchAndCachePrice(underlying: string, quote: string): Promise<void> {
+    await this.contract.fetch_and_cache_price({
+      args: { underlying, quote },
+      gas: new BN('50000000000000'),
+    });
+  }
+
+  async configureOracle(
+    underlying: string,
+    quote: string,
+    poolId: number,
+    twapWindow: number = 300, // 5 minutes default
+    useStablePool: boolean = false
+  ): Promise<void> {
+    await this.contract.configure_oracle({
+      args: {
+        underlying,
+        quote,
+        config: {
+          rhea_pool_id: poolId,
+          twap_window: twapWindow,
+          max_staleness: 600, // 10 minutes
+          max_deviation_bps: 500, // 5%
+          use_stable_pool: useStablePool,
+        },
+      },
+      gas: new BN('30000000000000'),
     });
   }
 }

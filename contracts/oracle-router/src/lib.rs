@@ -5,7 +5,8 @@ use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::{env, ext_contract, near, AccountId, Gas, PanicOnDefault, Promise};
 
 const TGAS: u64 = 1_000_000_000_000;
-const REF_FINANCE_ACCOUNT: &str = "v2.ref-finance.near";
+const RHEA_FINANCE_ACCOUNT: &str = "rhea.near"; // Updated to Rhea Finance
+const RHEA_TESTNET_ACCOUNT: &str = "rhea.testnet";
 
 #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone)]
 #[serde(crate = "near_sdk::serde")]
@@ -18,16 +19,24 @@ pub struct PriceData {
 #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone)]
 #[serde(crate = "near_sdk::serde")]
 pub struct OracleConfig {
-    pub ref_pool_id: u64,
-    pub twap_window: u64,
-    pub max_staleness: u64,
-    pub max_deviation_bps: u16,
+    pub rhea_pool_id: u64,  // Updated from ref_pool_id
+    pub twap_window: u64,    // TWAP window in seconds
+    pub max_staleness: u64,  // Max age of cached price in seconds
+    pub max_deviation_bps: u16,  // Max deviation for sanity check
+    pub use_stable_pool: bool,   // Whether to use Rhea's stable pool pricing
 }
 
-#[ext_contract(ext_ref)]
-trait RefFinance {
+#[ext_contract(ext_rhea)]
+trait RheaFinance {
     fn get_pool(&self, pool_id: u64) -> Promise;
     fn get_return(&self, pool_id: u64, token_in: AccountId, amount_in: U128, token_out: AccountId) -> U128;
+    fn get_stable_pool_price(&self, pool_id: u64, token_in: AccountId, token_out: AccountId) -> U128;
+    fn get_twap_price(&self, pool_id: u64, token_in: AccountId, token_out: AccountId, window_secs: u64) -> U128;
+}
+
+#[ext_contract(ext_self)]
+trait OracleRouterCallback {
+    fn update_price_from_rhea(&mut self, underlying: AccountId, quote: AccountId, price: U128) -> PriceData;
 }
 
 #[near(contract_state)]
@@ -81,16 +90,13 @@ impl OracleRouter {
     }
 
     #[private]
-    pub fn update_price_from_ref(
+    pub fn update_price_from_rhea(
         &mut self,
         underlying: AccountId,
         quote: AccountId,
-        pool_data: String,
+        price: U128,
     ) -> PriceData {
         let key = self.make_key(&underlying, &quote);
-        let config = self.oracle_configs.get(&key).expect("Oracle not configured");
-        
-        let price = self.calculate_twap_price(&pool_data, &config);
         
         let price_data = PriceData {
             price,
@@ -99,7 +105,7 @@ impl OracleRouter {
         };
         
         self.price_cache.insert(&key, &price_data.clone());
-        env::log_str(&format!("Price updated: {}/{} = {}", underlying, quote, price.0));
+        env::log_str(&format!("Price updated from Rhea: {}/{} = {}", underlying, quote, price.0));
         
         price_data
     }
@@ -110,13 +116,20 @@ impl OracleRouter {
         let key = self.make_key(&underlying, &quote);
         let config = self.oracle_configs.get(&key).expect("Oracle not configured");
         
-        ext_ref::ext(AccountId::new_unchecked(REF_FINANCE_ACCOUNT.to_string()))
-            .with_static_gas(Gas::from_tgas(5))
-            .get_return(
-                config.ref_pool_id,
+        let rhea_account = if cfg!(feature = "testnet") {
+            RHEA_TESTNET_ACCOUNT
+        } else {
+            RHEA_FINANCE_ACCOUNT
+        };
+        
+        // Use Rhea's TWAP price method for better manipulation resistance
+        ext_rhea::ext(AccountId::new_unchecked(rhea_account.to_string()))
+            .with_static_gas(Gas::from_tgas(10))
+            .get_twap_price(
+                config.rhea_pool_id,
                 underlying.clone(),
-                U128(10_u128.pow(24)),
                 quote.clone(),
+                config.twap_window,
             )
     }
 
@@ -135,8 +148,41 @@ impl OracleRouter {
         self.oracle_configs.get(&key)
     }
 
-    fn calculate_twap_price(&self, pool_data: &str, config: &OracleConfig) -> U128 {
-        U128(10_u128.pow(24))
+    pub fn fetch_and_cache_price(&mut self, underlying: AccountId, quote: AccountId) -> Promise {
+        assert!(!self.paused, "Oracle is paused");
+        
+        let key = self.make_key(&underlying, &quote);
+        let config = self.oracle_configs.get(&key).expect("Oracle not configured");
+        
+        let rhea_account = if cfg!(feature = "testnet") {
+            RHEA_TESTNET_ACCOUNT
+        } else {
+            RHEA_FINANCE_ACCOUNT
+        };
+        
+        if config.use_stable_pool {
+            ext_rhea::ext(AccountId::new_unchecked(rhea_account.to_string()))
+                .with_static_gas(Gas::from_tgas(10))
+                .get_stable_pool_price(
+                    config.rhea_pool_id,
+                    underlying.clone(),
+                    quote.clone(),
+                )
+        } else {
+            ext_rhea::ext(AccountId::new_unchecked(rhea_account.to_string()))
+                .with_static_gas(Gas::from_tgas(10))
+                .get_twap_price(
+                    config.rhea_pool_id,
+                    underlying.clone(),
+                    quote.clone(),
+                    config.twap_window,
+                )
+        }
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(Gas::from_tgas(5))
+                    .update_price_from_rhea(underlying, quote, U128(0))
+            )
     }
 
     fn make_key(&self, underlying: &AccountId, quote: &AccountId) -> String {
