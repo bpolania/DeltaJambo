@@ -3,6 +3,13 @@ set -e
 
 echo "Building NEAR smart contracts..."
 
+# Check if testnet build is requested
+FEATURES=""
+if [ "$1" = "testnet" ]; then
+    echo "Building for TESTNET with Rhea testnet configuration..."
+    FEATURES="--features testnet"
+fi
+
 CONTRACTS=(
     "long-token"
     "short-token"
@@ -15,7 +22,14 @@ CONTRACTS=(
 for contract in "${CONTRACTS[@]}"; do
     echo "Building $contract..."
     cd contracts/$contract
-    cargo build --target wasm32-unknown-unknown --release
+    
+    # Add features flag for oracle-router
+    if [ "$contract" = "oracle-router" ] && [ -n "$FEATURES" ]; then
+        cargo build --target wasm32-unknown-unknown --release $FEATURES
+    else
+        cargo build --target wasm32-unknown-unknown --release
+    fi
+    
     cd ../..
 done
 

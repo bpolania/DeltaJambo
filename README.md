@@ -11,7 +11,7 @@ A non-leveraged, cash-settled forward product for meme coins on NEAR Protocol. T
 3. **LongToken** - NEP-141 token representing long positions
 4. **ShortToken** - NEP-141 token representing short positions
 5. **FeeCollector** - Collects and manages protocol fees
-6. **OracleRouter** - Integrates with Ref Finance for price feeds
+6. **OracleRouter** - Integrates with Rhea Finance (formerly Ref Finance) for TWAP price feeds
 
 ### Key Features
 
@@ -151,6 +151,32 @@ await marketClient.createPosition('1000000000000000000000000');
 const [longValue, shortValue] = await marketClient.previewSettlement('45000000000000000000000000');
 ```
 
+## Oracle Integration
+
+The protocol uses Rhea Finance (the merged platform of Ref Finance and Burrow) for price feeds:
+
+- **TWAP Support**: Time-weighted average prices to prevent manipulation
+- **Stable Pool Pricing**: Option to use Rhea's stable pool for stablecoin pairs
+- **Configurable Windows**: Adjustable TWAP windows (default 5 minutes)
+- **Price Caching**: Cached prices with configurable staleness limits
+- **Testnet Support**: Automatic network detection for mainnet/testnet
+
+### Configuring Oracle
+
+```bash
+near call oracle.testnet configure_oracle '{
+  "underlying": "wrap.near",
+  "quote": "usdc.near",
+  "config": {
+    "rhea_pool_id": 1234,
+    "twap_window": 300,
+    "max_staleness": 600,
+    "max_deviation_bps": 500,
+    "use_stable_pool": false
+  }
+}' --accountId owner.testnet
+```
+
 ## Security Considerations
 
 - All contracts use NEAR SDK's built-in reentrancy guards
@@ -158,7 +184,8 @@ const [longValue, shortValue] = await marketClient.previewSettlement('4500000000
 - Guardian role for operational security
 - Owner role for parameter updates
 - Strict validation of market parameters
-- No external dependencies beyond NEAR SDK and Ref Finance
+- TWAP oracles for manipulation resistance
+- No external dependencies beyond NEAR SDK and Rhea Finance
 
 ## License
 
