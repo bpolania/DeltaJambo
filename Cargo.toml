@@ -1,0 +1,18 @@
+[workspace]
+members = [
+    "contracts/forward-factory",
+    "contracts/forward-market", 
+    "contracts/long-token",
+    "contracts/short-token",
+    "contracts/fee-collector",
+    "contracts/oracle-router"
+]
+resolver = "2"
+
+[workspace.dependencies]
+near-sdk = "5.5.0"
+near-contract-standards = "5.5.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+borsh = { version = "1.5", features = ["derive"] }
+uint = { version = "0.10.0", default-features = false }
